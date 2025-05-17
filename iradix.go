@@ -269,6 +269,7 @@ func longestPrefix(k1, k2 []byte) int {
 		l = l2
 	}
 	var i int
+	//nolint:intrange
 	for i = 0; i < l; i++ {
 		if k1[i] != k2[i] {
 			break
