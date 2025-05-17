@@ -1,3 +1,3 @@
-module github.com/outofforest/go-immutable-radix
+module github.com/outofforest/iradix
 
 go 1.24.0
