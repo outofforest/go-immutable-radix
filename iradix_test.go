@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func CopyTree(t *Node) *Node {
@@ -35,7 +37,9 @@ func TestRadix_HugeTxn(t *testing.T) {
 	var expect []string
 	for i := range 800_000 {
 		key := randomString(t)
-		txn1.Insert([]byte(key), i)
+		oldV, oldOk := txn1.Insert([]byte(key), i)
+		require.False(t, oldOk)
+		require.Nil(t, oldV)
 		expect = append(expect, key)
 	}
 	r = txn1.Commit()
@@ -81,7 +85,9 @@ func TestRadix(t *testing.T) {
 	rCopy := CopyTree(r)
 	for k, v := range inp {
 		txn := NewTxn(r)
-		txn.Insert([]byte(k), v)
+		oldV, oldOk := txn.Insert([]byte(k), v)
+		require.False(t, oldOk)
+		require.Nil(t, oldV)
 		newR := txn.Commit()
 		if !reflect.DeepEqual(r, rCopy) {
 			t.Errorf("r: %#v rc: %#v", r, rCopy)
@@ -105,9 +111,11 @@ func TestRadix(t *testing.T) {
 	orig := r
 	origCopy := CopyTree(r)
 
-	for k := range inp {
+	for k, v := range inp {
 		txn := NewTxn(r)
-		txn.Delete([]byte(k))
+		oldV, oldOk := txn.Delete([]byte(k))
+		require.True(t, oldOk)
+		require.Equal(t, v, oldV)
 		r = txn.Commit()
 	}
 
@@ -119,11 +127,29 @@ func TestRadix(t *testing.T) {
 func TestRoot(t *testing.T) {
 	r := New()
 	txn := NewTxn(r)
-	txn.Delete(nil)
+	oldV, oldOk := txn.Delete(nil)
+	require.False(t, oldOk)
+	require.Nil(t, oldV)
 	r = txn.Commit()
+
 	txn = NewTxn(r)
-	txn.Insert(nil, true)
+	oldV, oldOk = txn.Insert(nil, true)
+	require.False(t, oldOk)
+	require.Nil(t, oldV)
 	r = txn.Commit()
+
+	txn = NewTxn(r)
+	oldV, oldOk = txn.Insert(nil, false)
+	require.True(t, oldOk)
+	require.True(t, oldV.(bool))
+	r = txn.Commit()
+
+	txn = NewTxn(r)
+	oldV, oldOk = txn.Insert(nil, true)
+	require.True(t, oldOk)
+	require.False(t, oldV.(bool))
+	r = txn.Commit()
+
 	txn = NewTxn(r)
 	val, ok := txn.Get(nil)
 	if !ok || val != true {
@@ -131,8 +157,11 @@ func TestRoot(t *testing.T) {
 	}
 	r = txn.Commit()
 	txn = NewTxn(r)
-	txn.Delete(nil)
+	oldV, oldOk = txn.Delete(nil)
+	require.True(t, oldOk)
+	require.True(t, oldV.(bool))
 	txn.Commit()
+
 	val, ok = txn.Get(nil)
 	if ok {
 		t.Fatalf("bad: %#v", val)
@@ -140,13 +169,34 @@ func TestRoot(t *testing.T) {
 	txn.Commit()
 }
 
-func TestDelete(t *testing.T) {
+func TestInsertUpdateDelete(t *testing.T) {
 	r := New()
 	s := []string{"", "A", "AB"}
 
 	for _, ss := range s {
 		txn := NewTxn(r)
-		txn.Insert([]byte(ss), true)
+		oldV, oldOk := txn.Insert([]byte(ss), false)
+		require.False(t, oldOk)
+		require.Nil(t, oldV)
+		r = txn.Commit()
+	}
+
+	for _, ss := range s {
+		txn := NewTxn(r)
+
+		v, ok := txn.Get([]byte(ss))
+		if !ok || v != false {
+			t.Fatalf("bad %q", ss)
+		}
+
+		r = txn.Commit()
+	}
+
+	for _, ss := range s {
+		txn := NewTxn(r)
+		oldV, oldOk := txn.Insert([]byte(ss), true)
+		require.True(t, oldOk)
+		require.False(t, oldV.(bool))
 		r = txn.Commit()
 	}
 
@@ -158,7 +208,9 @@ func TestDelete(t *testing.T) {
 			t.Fatalf("bad %q", ss)
 		}
 
-		txn.Delete([]byte(ss))
+		oldV, oldOk := txn.Delete([]byte(ss))
+		require.True(t, oldOk)
+		require.True(t, oldV.(bool))
 
 		v, ok = txn.Get([]byte(ss))
 		if ok || v == true {
