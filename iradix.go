@@ -47,7 +47,7 @@ func (t *Txn) Get(k []byte) (any, bool) {
 
 // Insert is used to add or update a given key. The return provides
 // the previous value and a bool indicating if any was set.
-func (t *Txn) Insert(k []byte, v any) {
+func (t *Txn) Insert(k []byte, v any) (any, bool) {
 	if k == nil {
 		k = []byte{}
 	}
@@ -60,11 +60,12 @@ func (t *Txn) Insert(k []byte, v any) {
 
 		// Handle key exhaustion.
 		if len(search) == 0 {
+			oldLeaf := nc.leaf
 			nc.leaf = leafNode{
 				key: k,
 				val: v,
 			}
-			return
+			return oldLeaf.val, oldLeaf.key != nil
 		}
 
 		// Look for the edge.
@@ -83,7 +84,7 @@ func (t *Txn) Insert(k []byte, v any) {
 					prefix: search,
 				},
 			})
-			return
+			return nil, false
 		}
 
 		// Determine longest prefix of the search key on match.
@@ -122,7 +123,7 @@ func (t *Txn) Insert(k []byte, v any) {
 		search = search[commonPrefix:]
 		if len(search) == 0 {
 			splitNode.leaf = leaf
-			return
+			return nil, false
 		}
 
 		// Create a new edge for the node.
@@ -134,21 +135,22 @@ func (t *Txn) Insert(k []byte, v any) {
 				prefix:   search,
 			},
 		})
-		return
+		return nil, false
 	}
 }
 
 // Delete is used to delete a given key. Returns the old value if any,
 // and a bool indicating if the key was set.
-func (t *Txn) Delete(k []byte) {
+func (t *Txn) Delete(k []byte) (any, bool) {
 	if k == nil {
 		k = []byte{}
 	}
 
-	newRoot := t.delete(t.root, k)
+	newRoot, oldValue := t.delete(t.root, k)
 	if newRoot != nil {
 		t.root = newRoot
 	}
+	return oldValue, newRoot != nil
 }
 
 // Commit is used to finalize the transaction and return a new tree.
@@ -216,36 +218,37 @@ func (t *Txn) mergeChild(n *Node) {
 	}
 }
 
-func (t *Txn) delete(n *Node, search []byte) *Node {
+func (t *Txn) delete(n *Node, search []byte) (*Node, any) {
 	// Check for key exhaustion.
 	if len(search) == 0 {
-		if !n.isLeaf() {
-			return nil
+		if n.leaf.key == nil {
+			return nil, nil
 		}
 
 		// Remove the leaf node.
 		nc := t.writeNode(n)
+		oldValue := nc.leaf.val
 		nc.leaf = leafNode{}
 
 		// Check if this node should be merged.
 		if n != t.root && len(nc.edges) == 1 {
 			t.mergeChild(nc)
 		}
-		return nc
+		return nc, oldValue
 	}
 
 	// Look for an edge.
 	label := search[0]
 	idx, child := n.getEdge(label)
 	if child == nil || !bytes.HasPrefix(search, child.prefix) {
-		return nil
+		return nil, nil
 	}
 
 	// Consume the search prefix
 	search = search[len(child.prefix):]
-	newChild := t.delete(child, search)
+	newChild, oldValue := t.delete(child, search)
 	if newChild == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Copy this node.
@@ -254,13 +257,13 @@ func (t *Txn) delete(n *Node, search []byte) *Node {
 	// Delete the edge if the node has no edges.
 	if newChild.leaf.key == nil && len(newChild.edges) == 0 {
 		nc.delEdge(label)
-		if n != t.root && len(nc.edges) == 1 && !nc.isLeaf() {
+		if n != t.root && len(nc.edges) == 1 && nc.leaf.key == nil {
 			t.mergeChild(nc)
 		}
 	} else {
 		nc.edges[idx].node = newChild
 	}
-	return nc
+	return nc, oldValue
 }
 
 func longestPrefix(k1, k2 []byte) int {

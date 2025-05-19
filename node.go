@@ -41,7 +41,7 @@ func (n *Node) Get(k []byte) (any, bool) {
 	for {
 		// Check for key exhaustion
 		if len(search) == 0 {
-			if n.isLeaf() {
+			if n.leaf.key != nil {
 				return n.leaf.val, true
 			}
 			break
@@ -73,10 +73,6 @@ func (n *Node) Iterator() *Iterator {
 // the given node to walk the tree backwards.
 func (n *Node) ReverseIterator() *ReverseIterator {
 	return NewReverseIterator(n)
-}
-
-func (n *Node) isLeaf() bool {
-	return n.leaf.key != nil
 }
 
 func (n *Node) addEdge(e edge) {
