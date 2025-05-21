@@ -81,7 +81,7 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 						key: k,
 						val: v,
 					},
-					prefix: search,
+					prefix: copyPrefix(search),
 				},
 			})
 			return nil, false
@@ -98,7 +98,7 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 		// Split the node.
 		splitNode := &Node{
 			revision: t.revision,
-			prefix:   search[:commonPrefix],
+			prefix:   copyPrefix(search[:commonPrefix]),
 		}
 		nc.replaceEdge(edge{
 			label: search[0],
@@ -132,7 +132,7 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 			node: &Node{
 				revision: t.revision,
 				leaf:     leaf,
-				prefix:   search,
+				prefix:   copyPrefix(search),
 			},
 		})
 		return nil, false
@@ -208,7 +208,7 @@ func (t *Txn) mergeChild(n *Node) {
 	child := e.node
 
 	// Merge the nodes.
-	n.prefix = concat(n.prefix, child.prefix)
+	n.prefix = concatPrefixes(n.prefix, child.prefix)
 	n.leaf = child.leaf
 	if len(child.edges) != 0 {
 		n.edges = make([]edge, len(child.edges))
@@ -281,9 +281,14 @@ func longestPrefix(k1, k2 []byte) int {
 	return i
 }
 
-func concat(a, b []byte) []byte {
+func concatPrefixes(a, b []byte) []byte {
 	c := make([]byte, len(a)+len(b))
-	copy(c, a)
-	copy(c[len(a):], b)
+	copy(c[copy(c, a):], b)
+	return c
+}
+
+func copyPrefix(prefix []byte) []byte {
+	c := make([]byte, len(prefix))
+	copy(c, prefix)
 	return c
 }
