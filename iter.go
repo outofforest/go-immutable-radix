@@ -6,13 +6,13 @@ import (
 
 // Iterator is used to iterate over a set of nodes
 // in pre-order.
-type Iterator struct {
-	node  *Node
-	stack []edges
+type Iterator[T any] struct {
+	node  *Node[T]
+	stack []edges[T]
 }
 
 // SeekPrefix is used to seek the iterator to a given prefix.
-func (i *Iterator) SeekPrefix(prefix []byte) {
+func (i *Iterator[T]) SeekPrefix(prefix []byte) {
 	// Wipe the stack
 	i.stack = nil
 	n := i.node
@@ -45,12 +45,12 @@ func (i *Iterator) SeekPrefix(prefix []byte) {
 }
 
 // Next returns the next node in order.
-func (i *Iterator) Next() ([]byte, any, bool) {
+func (i *Iterator[T]) Next() *T {
 	// Initialize our stack if needed
 	if i.stack == nil && i.node != nil {
-		i.stack = []edges{
+		i.stack = []edges[T]{
 			{
-				edge{node: i.node},
+				edge[T]{node: i.node},
 			},
 		}
 	}
@@ -74,9 +74,9 @@ func (i *Iterator) Next() ([]byte, any, bool) {
 		}
 
 		// Return the leaf values if any
-		if elem.leaf.key != nil {
-			return elem.leaf.key, elem.leaf.val, true
+		if elem.value != nil {
+			return elem.value
 		}
 	}
-	return nil, nil, false
+	return nil
 }

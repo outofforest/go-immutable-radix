@@ -10,13 +10,13 @@ import (
 // hash map is prefix-based lookups and ordered iteration. The immutability
 // means that it is safe to concurrently read from a Tree without any
 // coordination.
-func New() *Node {
-	return &Node{}
+func New[T any]() *Node[T] {
+	return &Node[T]{}
 }
 
 // NewTxn creates new transaction that can be used to mutate the tree.
-func NewTxn(root *Node) *Txn {
-	return &Txn{
+func NewTxn[T any](root *Node[T]) *Txn[T] {
+	return &Txn[T]{
 		revision: root.revision + 1,
 		root:     root,
 	}
@@ -25,29 +25,29 @@ func NewTxn(root *Node) *Txn {
 // Txn is a transaction on the tree. This transaction is applied
 // atomically and returns a new tree when committed. A transaction
 // is not thread safe, and should only be used by a single goroutine.
-type Txn struct {
+type Txn[T any] struct {
 	revision uint64
 
 	// root is the modified root for the transaction.
-	root *Node
+	root *Node[T]
 }
 
 // Root returns the current root of the radix tree within this
 // transaction. The root is not safe across insert and delete operations,
 // but can be used to read the current state during a transaction.
-func (t *Txn) Root() *Node {
+func (t *Txn[T]) Root() *Node[T] {
 	return t.root
 }
 
 // Get is used to lookup a specific key, returning
 // the value and if it was found.
-func (t *Txn) Get(k []byte) (any, bool) {
+func (t *Txn[T]) Get(k []byte) *T {
 	return t.root.Get(k)
 }
 
 // Insert is used to add or update a given key. The return provides
 // the previous value and a bool indicating if any was set.
-func (t *Txn) Insert(k []byte, v any) (any, bool) {
+func (t *Txn[T]) Insert(k []byte, v *T) *T {
 	if k == nil {
 		k = []byte{}
 	}
@@ -60,12 +60,9 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 
 		// Handle key exhaustion.
 		if len(search) == 0 {
-			oldLeaf := nc.leaf
-			nc.leaf = leafNode{
-				key: k,
-				val: v,
-			}
-			return oldLeaf.val, oldLeaf.key != nil
+			oldValue := nc.value
+			nc.value = v
+			return oldValue
 		}
 
 		// Look for the edge.
@@ -73,18 +70,15 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 
 		// No edge, create one
 		if child == nil {
-			nc.addEdge(edge{
+			nc.addEdge(edge[T]{
 				label: search[0],
-				node: &Node{
+				node: &Node[T]{
 					revision: t.revision,
-					leaf: leafNode{
-						key: k,
-						val: v,
-					},
-					prefix: copyPrefix(search),
+					value:    v,
+					prefix:   copyPrefix(search),
 				},
 			})
-			return nil, false
+			return nil
 		}
 
 		// Determine longest prefix of the search key on match.
@@ -96,52 +90,46 @@ func (t *Txn) Insert(k []byte, v any) (any, bool) {
 		}
 
 		// Split the node.
-		splitNode := &Node{
+		splitNode := &Node[T]{
 			revision: t.revision,
 			prefix:   copyPrefix(search[:commonPrefix]),
 		}
-		nc.replaceEdge(edge{
+		nc.replaceEdge(edge[T]{
 			label: search[0],
 			node:  splitNode,
 		})
 
 		// Restore the existing child node.
 		modChild := t.writeNode(child)
-		splitNode.addEdge(edge{
+		splitNode.addEdge(edge[T]{
 			label: modChild.prefix[commonPrefix],
 			node:  modChild,
 		})
 		modChild.prefix = modChild.prefix[commonPrefix:]
 
-		// Create a new leaf node.
-		leaf := leafNode{
-			key: k,
-			val: v,
-		}
-
 		// If the new key is a subset, add to this node.
 		search = search[commonPrefix:]
 		if len(search) == 0 {
-			splitNode.leaf = leaf
-			return nil, false
+			splitNode.value = v
+			return nil
 		}
 
 		// Create a new edge for the node.
-		splitNode.addEdge(edge{
+		splitNode.addEdge(edge[T]{
 			label: search[0],
-			node: &Node{
+			node: &Node[T]{
 				revision: t.revision,
-				leaf:     leaf,
+				value:    v,
 				prefix:   copyPrefix(search),
 			},
 		})
-		return nil, false
+		return nil
 	}
 }
 
 // Delete is used to delete a given key. Returns the old value if any,
 // and a bool indicating if the key was set.
-func (t *Txn) Delete(k []byte) (any, bool) {
+func (t *Txn[T]) Delete(k []byte) *T {
 	if k == nil {
 		k = []byte{}
 	}
@@ -150,11 +138,11 @@ func (t *Txn) Delete(k []byte) (any, bool) {
 	if newRoot != nil {
 		t.root = newRoot
 	}
-	return oldValue, newRoot != nil
+	return oldValue
 }
 
 // Commit is used to finalize the transaction and return a new tree.
-func (t *Txn) Commit() *Node {
+func (t *Txn[T]) Commit() *Node[T] {
 	return t.root
 }
 
@@ -163,9 +151,9 @@ func (t *Txn) Commit() *Node {
 // but further mutations to either will be independent and result in different radix trees on Commit.
 // A cloned transaction may be passed to another goroutine and mutated there independently however each transaction
 // may only be mutated in a single thread.
-func (t *Txn) Clone() *Txn {
+func (t *Txn[T]) Clone() *Txn[T] {
 	t.revision++
-	return &Txn{
+	return &Txn[T]{
 		revision: t.revision,
 		root:     t.root,
 	}
@@ -175,7 +163,7 @@ func (t *Txn) Clone() *Txn {
 // modified during the course of the transaction, it is used in-place. Set
 // forLeafUpdate to true if you are getting a write node to update the leaf,
 // which will set leaf mutation tracking appropriately as well.
-func (t *Txn) writeNode(n *Node) *Node {
+func (t *Txn[T]) writeNode(n *Node[T]) *Node[T] {
 	if n.revision == t.revision {
 		return n
 	}
@@ -184,14 +172,14 @@ func (t *Txn) writeNode(n *Node) *Node {
 	// safe to replace this leaf with another after you get your node for
 	// writing. You MUST replace it, because the channel associated with
 	// this leaf will be closed when this transaction is committed.
-	nc := &Node{
+	nc := &Node[T]{
 		revision: t.revision,
-		leaf:     n.leaf,
+		value:    n.value,
 		prefix:   n.prefix,
 	}
 	if len(n.edges) != 0 {
 		// +2 is for possible new edges, to avoid slice growing later
-		nc.edges = make([]edge, len(n.edges), len(n.edges)+2)
+		nc.edges = make([]edge[T], len(n.edges), len(n.edges)+2)
 		copy(nc.edges, n.edges)
 	}
 
@@ -200,7 +188,7 @@ func (t *Txn) writeNode(n *Node) *Node {
 
 // mergeChild is called to collapse the given node with its child. This is only
 // called when the given node is not a leaf and has a single edge.
-func (t *Txn) mergeChild(n *Node) {
+func (t *Txn[T]) mergeChild(n *Node[T]) {
 	// Mark the child node as being mutated since we are about to abandon
 	// it. We don't need to mark the leaf since we are retaining it if it
 	// is there.
@@ -209,26 +197,26 @@ func (t *Txn) mergeChild(n *Node) {
 
 	// Merge the nodes.
 	n.prefix = concatPrefixes(n.prefix, child.prefix)
-	n.leaf = child.leaf
+	n.value = child.value
 	if len(child.edges) != 0 {
-		n.edges = make([]edge, len(child.edges))
+		n.edges = make([]edge[T], len(child.edges))
 		copy(n.edges, child.edges)
 	} else {
 		n.edges = nil
 	}
 }
 
-func (t *Txn) delete(n *Node, search []byte) (*Node, any) {
+func (t *Txn[T]) delete(n *Node[T], search []byte) (*Node[T], *T) {
 	// Check for key exhaustion.
 	if len(search) == 0 {
-		if n.leaf.key == nil {
+		if n.value == nil {
 			return nil, nil
 		}
 
 		// Remove the leaf node.
 		nc := t.writeNode(n)
-		oldValue := nc.leaf.val
-		nc.leaf = leafNode{}
+		oldValue := nc.value
+		nc.value = nil
 
 		// Check if this node should be merged.
 		if n != t.root && len(nc.edges) == 1 {
@@ -255,9 +243,9 @@ func (t *Txn) delete(n *Node, search []byte) (*Node, any) {
 	nc := t.writeNode(n)
 
 	// Delete the edge if the node has no edges.
-	if newChild.leaf.key == nil && len(newChild.edges) == 0 {
+	if newChild.value == nil && len(newChild.edges) == 0 {
 		nc.delEdge(label)
-		if n != t.root && len(nc.edges) == 1 && nc.leaf.key == nil {
+		if n != t.root && len(nc.edges) == 1 && nc.value == nil {
 			t.mergeChild(nc)
 		}
 	} else {
