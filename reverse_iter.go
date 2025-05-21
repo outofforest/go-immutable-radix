@@ -2,8 +2,8 @@ package iradix
 
 // ReverseIterator is used to iterate over a set of nodes
 // in reverse in-order.
-type ReverseIterator struct {
-	i *Iterator
+type ReverseIterator[T any] struct {
+	i *Iterator[T]
 
 	// expandedParents stores the set of parent nodes whose relevant children have
 	// already been pushed into the stack. This can happen during seek or during
@@ -13,34 +13,34 @@ type ReverseIterator struct {
 	// output the value stored in an internal leaf since all children are greater.
 	// We use this to track whether we have already ensured all the children are
 	// in the stack.
-	expandedParents map[*Node]struct{}
+	expandedParents map[*Node[T]]struct{}
 }
 
 // NewReverseIterator returns a new ReverseIterator at a node.
-func NewReverseIterator(n *Node) *ReverseIterator {
-	return &ReverseIterator{
-		i: &Iterator{node: n},
+func NewReverseIterator[T any](n *Node[T]) *ReverseIterator[T] {
+	return &ReverseIterator[T]{
+		i: &Iterator[T]{node: n},
 	}
 }
 
 // SeekPrefix is used to seek the iterator to a given prefix.
-func (ri *ReverseIterator) SeekPrefix(prefix []byte) {
+func (ri *ReverseIterator[T]) SeekPrefix(prefix []byte) {
 	ri.i.SeekPrefix(prefix)
 }
 
 // Previous returns the previous node in reverse order.
-func (ri *ReverseIterator) Previous() ([]byte, any, bool) {
+func (ri *ReverseIterator[T]) Previous() *T {
 	// Initialize our stack if needed.
 	if ri.i.stack == nil && ri.i.node != nil {
-		ri.i.stack = []edges{
+		ri.i.stack = []edges[T]{
 			{
-				edge{node: ri.i.node},
+				edge[T]{node: ri.i.node},
 			},
 		}
 	}
 
 	if ri.expandedParents == nil {
-		ri.expandedParents = make(map[*Node]struct{})
+		ri.expandedParents = map[*Node[T]]struct{}{}
 	}
 
 	for len(ri.i.stack) > 0 {
@@ -77,11 +77,11 @@ func (ri *ReverseIterator) Previous() ([]byte, any, bool) {
 		}
 
 		// If this is a leaf, return it.
-		if elem.leaf.key != nil {
-			return elem.leaf.key, elem.leaf.val, true
+		if elem.value != nil {
+			return elem.value
 		}
 
 		// it's not a leaf so keep walking the stack to find the previous leaf.
 	}
-	return nil, nil, false
+	return nil
 }

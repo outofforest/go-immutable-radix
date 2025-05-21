@@ -3,11 +3,11 @@ package iradix
 import "testing"
 
 func TestReverseIterator_SeekPrefix(t *testing.T) {
-	r := New()
+	r := New[int]()
 	keys := []string{"001", "002", "005", "010", "100"}
-	for _, k := range keys {
+	for i, k := range keys {
 		txn := NewTxn(r)
-		txn.Insert([]byte(k), nil)
+		txn.Insert([]byte(k), &i)
 		r = txn.Commit()
 	}
 
@@ -47,22 +47,21 @@ func TestReverseIterator_SeekPrefix(t *testing.T) {
 }
 
 func TestReverseIterator_Previous(t *testing.T) {
-	r := New()
+	r := New[int]()
 	keys := []string{"001", "002", "005", "010", "100"}
-	for _, k := range keys {
+	for i, k := range keys {
 		txn := NewTxn(r)
-		txn.Insert([]byte(k), nil)
+		txn.Insert([]byte(k), &i)
 		r = txn.Commit()
 	}
 
 	it := r.ReverseIterator()
 
 	for i := len(keys) - 1; i >= 0; i-- {
-		got, _, _ := it.Previous()
-		want := keys[i]
+		got := it.Previous()
 
-		if string(got) != want {
-			t.Errorf("got: %v, want: %v", got, want)
+		if *got != i {
+			t.Errorf("got: %v, want: %v", got, i)
 		}
 	}
 }
