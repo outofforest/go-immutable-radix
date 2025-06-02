@@ -336,9 +336,7 @@ func TestIteratePrefix(t *testing.T) {
 
 	for idx, test := range cases {
 		iter := r.Iterator()
-		if test.inp != "" {
-			iter.SeekPrefix([]byte(test.inp))
-		}
+		iter.SeekPrefix([]byte(test.inp))
 
 		// Consume all the keys
 		out := []int{}
@@ -661,6 +659,145 @@ func TestIterateLowerBoundFuzz(t *testing.T) {
 
 	if err := quick.CheckEqual(radixAddAndScan, sliceAddSortAndFilter, nil); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestIteratePrefixAndLowerBound(t *testing.T) {
+	r := New[int]()
+
+	keys := []string{
+		"foo/bar/baz",
+		"foo/baz/bar",
+		"foo/zip/zap",
+		"foobar",
+		"zipzap",
+	}
+	values := []int{}
+	for i, k := range keys {
+		txn := NewTxn(r)
+		txn.Insert([]byte(k), &i)
+		r = txn.Commit()
+		values = append(values, i)
+	}
+
+	type exp struct {
+		prefix string
+		bound  string
+		out    []int
+	}
+	cases := []exp{
+		{
+			"",
+			"",
+			values,
+		},
+		{
+			"f",
+			"oo",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+				findIndex(keys, "foo/zip/zap"),
+				findIndex(keys, "foobar"),
+			},
+		},
+		{
+			"foo",
+			"",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+				findIndex(keys, "foo/zip/zap"),
+				findIndex(keys, "foobar"),
+			},
+		},
+		{
+			"foob",
+			"",
+			[]int{
+				findIndex(keys, "foobar"),
+			},
+		},
+		{
+			"foo/",
+			"b",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+				findIndex(keys, "foo/zip/zap"),
+			},
+		},
+		{
+			"foo",
+			"/b",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+				findIndex(keys, "foo/zip/zap"),
+				findIndex(keys, "foobar"),
+			},
+		},
+		{
+			"foo/b",
+			"ar",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+			},
+		},
+		{
+			"foo/ba",
+			"r/baz",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+				findIndex(keys, "foo/baz/bar"),
+			},
+		},
+		{
+			"foo/bar",
+			"/baz",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+			},
+		},
+		{
+			"foo/bar/baz",
+			"",
+			[]int{
+				findIndex(keys, "foo/bar/baz"),
+			},
+		},
+		{
+			"foo/bar/",
+			"zzz",
+			[]int{},
+		},
+		{
+			"z",
+			"a",
+			[]int{
+				findIndex(keys, "zipzap"),
+			},
+		},
+	}
+
+	for idx, test := range cases {
+		iter := r.Iterator()
+		iter.SeekPrefix([]byte(test.prefix))
+		iter.SeekLowerBound([]byte(test.bound))
+
+		// Consume all the keys
+		out := []int{}
+		for {
+			v := iter.Next()
+			if v == nil {
+				break
+			}
+			out = append(out, *v)
+		}
+		if !reflect.DeepEqual(out, test.out) {
+			t.Fatalf("mis-match: %d %v %v", idx, out, test.out)
+		}
 	}
 }
 
