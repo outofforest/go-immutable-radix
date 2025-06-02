@@ -9,33 +9,30 @@ import (
 type Iterator[T any] struct {
 	node  *Node[T]
 	stack []edges[T]
+	skip  int
 }
 
 // SeekPrefix is used to seek the iterator to a given prefix.
 func (i *Iterator[T]) SeekPrefix(prefix []byte) {
 	// Wipe the stack
 	i.stack = nil
-	n := i.node
 	search := prefix
 	for {
 		// Check for key exhaustion.
 		if len(search) == 0 {
-			i.node = n
+			i.skip = len(i.node.prefix)
 			return
 		}
 
 		// Look for an edge.
-		_, n = n.getEdge(search[0])
-		if n == nil {
-			i.node = nil
-			return
-		}
-
+		_, i.node = i.node.getEdge(search[0])
 		switch {
-		case bytes.HasPrefix(search, n.prefix):
-			search = search[len(n.prefix):]
-		case bytes.HasPrefix(n.prefix, search):
-			i.node = n
+		case i.node == nil:
+			return
+		case bytes.HasPrefix(search, i.node.prefix):
+			search = search[len(i.node.prefix):]
+		case bytes.HasPrefix(i.node.prefix, search):
+			i.skip = len(search)
 			return
 		default:
 			i.node = nil
@@ -49,6 +46,9 @@ func (i *Iterator[T]) SeekPrefix(prefix []byte) {
 // predict based on the radix structure which node(s) changes might affect the
 // result.
 func (i *Iterator[T]) SeekLowerBound(key []byte) {
+	if i.node == nil {
+		return
+	}
 	// Wipe the stack. Unlike Prefix iteration, we need to build the stack as we
 	// go because we need only a subset of edges of many nodes in the path to the
 	// leaf with the lower bound. Note that the iterator will still recurse into
@@ -70,18 +70,24 @@ func (i *Iterator[T]) SeekLowerBound(key []byte) {
 	}
 
 	findMin := func(n *Node[T]) {
-		if n := i.recurseMin(n); n != nil {
+		if n := i.findMin(n); n != nil {
 			i.stack = append(i.stack, edges[T]{edge[T]{node: n}})
 		}
 	}
 
 	for {
+		prefix := n.prefix
+		if i.skip > 0 {
+			prefix = prefix[i.skip:]
+			i.skip = 0
+		}
+
 		// Compare current prefix with the search key's same-length prefix.
 		var prefixCmp int
-		if len(n.prefix) < len(search) {
-			prefixCmp = bytes.Compare(n.prefix, search[:len(n.prefix)])
+		if len(prefix) < len(search) {
+			prefixCmp = bytes.Compare(prefix, search[:len(prefix)])
 		} else {
-			prefixCmp = bytes.Compare(n.prefix, search)
+			prefixCmp = bytes.Compare(prefix, search)
 		}
 
 		if prefixCmp > 0 {
@@ -101,7 +107,7 @@ func (i *Iterator[T]) SeekLowerBound(key []byte) {
 
 		// Prefix is equal, we are still heading for an exact match. If this is a
 		// leaf and an exact match we're done.
-		if len(n.prefix) == len(search) && n.value != nil {
+		if len(prefix) == len(search) && n.value != nil {
 			found(n)
 			return
 		}
@@ -109,7 +115,7 @@ func (i *Iterator[T]) SeekLowerBound(key []byte) {
 		// Consume the search prefix if the current node has one. Note that this is
 		// safe because if n.prefix is longer than the search slice prefixCmp would
 		// have been > 0 above and the method would have already returned.
-		search = search[len(n.prefix):]
+		search = search[len(prefix):]
 
 		if len(search) == 0 {
 			// We've exhausted the search key, but the current node is not an exact
@@ -173,20 +179,18 @@ func (i *Iterator[T]) Next() *T {
 	return nil
 }
 
-func (i *Iterator[T]) recurseMin(n *Node[T]) *Node[T] {
+func (i *Iterator[T]) findMin(n *Node[T]) *Node[T] {
 	// Traverse to the minimum child
-	if n.value != nil {
-		return n
+	for {
+		if n.value != nil {
+			return n
+		}
+		nEdges := len(n.edges)
+		if nEdges > 1 {
+			// Add all the other edges to the stack (the min node will be added as
+			// we recurse)
+			i.stack = append(i.stack, n.edges[1:])
+		}
+		n = n.edges[0].node
 	}
-	nEdges := len(n.edges)
-	if nEdges > 1 {
-		// Add all the other edges to the stack (the min node will be added as
-		// we recurse)
-		i.stack = append(i.stack, n.edges[1:])
-	}
-	if nEdges > 0 {
-		return i.recurseMin(n.edges[0].node)
-	}
-	// Shouldn't be possible
-	return nil
 }
