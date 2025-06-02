@@ -3,10 +3,13 @@ package iradix
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	mathrand "math/rand"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
@@ -349,6 +352,315 @@ func TestIteratePrefix(t *testing.T) {
 		if !reflect.DeepEqual(out, test.out) {
 			t.Fatalf("mis-match: %d %v %v", idx, out, test.out)
 		}
+	}
+}
+
+func TestIterateLowerBound(t *testing.T) {
+	// these should be defined in order
+	var fixedLenKeys = []string{
+		"00000",
+		"00001",
+		"00004",
+		"00010",
+		"00020",
+		"20020",
+	}
+
+	// these should be defined in order
+	var mixedLenKeys = []string{
+		"a1",
+		"abc",
+		"barbazboo",
+		"f",
+		"foo",
+		"found",
+		"zap",
+		"zip",
+	}
+
+	type exp struct {
+		keys   []string
+		search string
+		want   []string
+	}
+	cases := []exp{
+		{
+			fixedLenKeys,
+			"00000",
+			fixedLenKeys,
+		},
+		{
+			fixedLenKeys,
+			"00003",
+			[]string{
+				"00004",
+				"00010",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			fixedLenKeys,
+			"00010",
+			[]string{
+				"00010",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			fixedLenKeys,
+			"20000",
+			[]string{
+				"20020",
+			},
+		},
+		{
+			fixedLenKeys,
+			"20020",
+			[]string{
+				"20020",
+			},
+		},
+		{
+			fixedLenKeys,
+			"20022",
+			[]string{},
+		},
+		{
+			mixedLenKeys,
+			"A", // before all lower case letters
+			mixedLenKeys,
+		},
+		{
+			mixedLenKeys,
+			"a1",
+			mixedLenKeys,
+		},
+		{
+			mixedLenKeys,
+			"b",
+			[]string{
+				"barbazboo",
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			mixedLenKeys,
+			"bar",
+			[]string{
+				"barbazboo",
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			mixedLenKeys,
+			"barbazboo0",
+			[]string{
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			mixedLenKeys,
+			"zippy",
+			[]string{},
+		},
+		{
+			mixedLenKeys,
+			"zi",
+			[]string{
+				"zip",
+			},
+		},
+
+		// This is a case found by TestIterateLowerBoundFuzz simplified by hand. The
+		// lowest node should be the first, but it is split on the same char as the
+		// second char in the search string. My initial implementation didn't take
+		// that into account (i.e. propagate the fact that we already know we are
+		// greater than the input key into the recursion). This would skip the first
+		// result.
+		{
+			[]string{
+				"bb",
+				"bc",
+			},
+			"ac",
+			[]string{"bb", "bc"},
+		},
+
+		// This is a case found by TestIterateLowerBoundFuzz.
+		{
+			//nolint:lll
+			[]string{"aaaba", "aabaa", "aabab", "aabcb", "aacca", "abaaa", "abacb", "abbcb", "abcaa", "abcba", "abcbb", "acaaa", "acaab", "acaac", "acaca", "acacb", "acbaa", "acbbb", "acbcc", "accca", "babaa", "babcc", "bbaaa", "bbacc", "bbbab", "bbbac", "bbbcc", "bbcab", "bbcca", "bbccc", "bcaac", "bcbca", "bcbcc", "bccac", "bccbc", "bccca", "caaab", "caacc", "cabac", "cabbb", "cabbc", "cabcb", "cacac", "cacbc", "cacca", "cbaba", "cbabb", "cbabc", "cbbaa", "cbbab", "cbbbc", "cbcbb", "cbcbc", "cbcca", "ccaaa", "ccabc", "ccaca", "ccacc", "ccbac", "cccaa", "cccac", "cccca"},
+			"cbacb",
+			//nolint:lll
+			[]string{"cbbaa", "cbbab", "cbbbc", "cbcbb", "cbcbc", "cbcca", "ccaaa", "ccabc", "ccaca", "ccacc", "ccbac", "cccaa", "cccac", "cccca"},
+		},
+
+		// Panic case found be TestIterateLowerBoundFuzz.
+		{
+			[]string{"gcgc"},
+			"",
+			[]string{"gcgc"},
+		},
+
+		// We SHOULD support keys that are prefixes of each other despite some
+		// confusion in the original implementation.
+		{
+			[]string{"f", "fo", "foo", "food", "bug"},
+			"foo",
+			[]string{"foo", "food"},
+		},
+
+		// We also support the empty key (which is a prefix of every other key) as a
+		// valid key to insert and search for.
+		{
+			[]string{"f", "fo", "foo", "food", "bug", ""},
+			"foo",
+			[]string{"foo", "food"},
+		},
+		{
+			[]string{"f", "bug", ""},
+			"",
+			[]string{"", "bug", "f"},
+		},
+		{
+			[]string{"f", "bug", "xylophone"},
+			"",
+			[]string{"bug", "f", "xylophone"},
+		},
+
+		// This is a case we realized we were not covering while fixing
+		// SeekReverseLowerBound and could panic before.
+		{
+			[]string{"bar", "foo00", "foo11"},
+			"foo",
+			[]string{"foo00", "foo11"},
+		},
+	}
+
+	for idx, test := range cases {
+		t.Run(fmt.Sprintf("case%03d", idx), func(t *testing.T) {
+			r := New[string]()
+
+			// Insert keys
+			txn := NewTxn(r)
+			for _, k := range test.keys {
+				old := txn.Insert([]byte(k), &k)
+				if old != nil {
+					t.Fatalf("duplicate key %s in keys", k)
+				}
+			}
+			r = txn.Commit()
+
+			// Get and seek iterator
+			iter := r.Iterator()
+			iter.SeekLowerBound([]byte(test.search))
+
+			// Consume all the keys
+			out := []string{}
+			for {
+				v := iter.Next()
+				if v == nil {
+					break
+				}
+				out = append(out, *v)
+			}
+			if !reflect.DeepEqual(out, test.want) {
+				t.Fatalf("mis-match: key=%s\n  got=%v\n  want=%v", test.search,
+					out, test.want)
+			}
+		})
+	}
+}
+
+type readableString string
+
+func (s readableString) Generate(rand *mathrand.Rand, _ int) reflect.Value {
+	// Pick a random string from a limited alphabet that makes it easy to read the
+	// failure cases.
+	const letters = "abcdefg"
+
+	// Ignore size and make them all shortish to provoke bigger chance of hitting
+	// prefixes and more intersting tree shapes.
+	size := rand.Intn(8)
+
+	b := make([]byte, size)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return reflect.ValueOf(readableString(b))
+}
+
+func TestIterateLowerBoundFuzz(t *testing.T) {
+	r := New[readableString]()
+	set := []string{}
+
+	// This specifies a property where each call adds a new random key to the radix
+	// tree.
+	//
+	// It also maintains a plain sorted list of the same set of keys and asserts
+	// that iterating from some random key to the end using LowerBound produces
+	// the same list as filtering all sorted keys that are lower.
+
+	radixAddAndScan := func(newKey, searchKey readableString) []string {
+		txn := NewTxn(r)
+		txn.Insert([]byte(newKey), &newKey)
+		r = txn.Commit()
+
+		t.Logf("NewKey: %q, SearchKey: %q", newKey, searchKey)
+
+		// Now iterate the tree from searchKey to the end
+		it := r.Iterator()
+		result := []string{}
+		it.SeekLowerBound([]byte(searchKey))
+		for {
+			v := it.Next()
+			if v == nil {
+				break
+			}
+			result = append(result, string(*v))
+		}
+		return result
+	}
+
+	sliceAddSortAndFilter := func(newKey, searchKey readableString) []string {
+		// Append the key to the set and re-sort
+		set = append(set, string(newKey))
+		sort.Strings(set)
+
+		t.Logf("Current Set: %#v", set)
+		t.Logf("Search Key: %#v %v", searchKey, "" >= string(searchKey))
+
+		result := []string{}
+		for i, k := range set {
+			// Check this is not a duplicate of the previous value. Note we don't just
+			// store the last string to compare because empty string is a valid value
+			// in the set and makes comparing on the first iteration awkward.
+			if i > 0 && set[i-1] == k {
+				continue
+			}
+			if k >= string(searchKey) {
+				result = append(result, k)
+			}
+		}
+		return result
+	}
+
+	if err := quick.CheckEqual(radixAddAndScan, sliceAddSortAndFilter, nil); err != nil {
+		t.Error(err)
 	}
 }
 

@@ -1,6 +1,8 @@
 package iradix
 
-import "bytes"
+import (
+	"bytes"
+)
 
 // edge is used to represent an edge node.
 type edge[T any] struct {
@@ -53,12 +55,6 @@ func (n *Node[T]) Iterator() *Iterator[T] {
 	return &Iterator[T]{node: n}
 }
 
-// ReverseIterator is used to return an iterator at
-// the given node to walk the tree backwards.
-func (n *Node[T]) ReverseIterator() *ReverseIterator[T] {
-	return NewReverseIterator[T](n)
-}
-
 func (n *Node[T]) addEdge(e edge[T]) {
 	num := len(n.edges)
 	idx := search[T](n.edges, e.label)
@@ -96,6 +92,15 @@ func (n *Node[T]) delEdge(label byte) {
 		n.edges[len(n.edges)-1] = edge[T]{}
 		n.edges = n.edges[:len(n.edges)-1]
 	}
+}
+
+func (n *Node[T]) getLowerBoundEdge(label byte) (int, *Node[T]) {
+	idx := search(n.edges, label)
+	// we want lower bound behavior so return even if it's not an exact match
+	if idx < len(n.edges) {
+		return idx, n.edges[idx].node
+	}
+	return -1, nil
 }
 
 // rawIterator is used to return a raw iterator at the given node to walk the
