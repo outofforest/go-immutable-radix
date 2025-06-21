@@ -584,6 +584,105 @@ func TestIterateLowerBound(t *testing.T) {
 	}
 }
 
+func TestIterateBack(t *testing.T) {
+	// these should be defined in order
+	var fixedLenKeys = []string{
+		"00000",
+		"00001",
+		"00004",
+		"00010",
+		"00020",
+		"20020",
+	}
+
+	// these should be defined in order
+	// var mixedLenKeys = []string{
+	// 	"a1",
+	// 	"abc",
+	// 	"barbazboo",
+	// 	"f",
+	// 	"foo",
+	// 	"found",
+	// 	"zap",
+	// 	"zip",
+	// }
+
+	type exp struct {
+		keys   []string
+		search string
+		steps  []int
+		want   []string
+	}
+
+	cases := []exp{
+		{
+			keys:   fixedLenKeys,
+			search: "00000",
+			steps:  []int{0},
+			want:   fixedLenKeys,
+		},
+		{
+			keys:   fixedLenKeys,
+			search: "00000",
+			steps:  []int{1, -1},
+			want:   fixedLenKeys,
+		},
+		{
+			keys:   fixedLenKeys,
+			search: "00010",
+			steps:  []int{-1},
+			want:   fixedLenKeys,
+		},
+		{
+			keys:   fixedLenKeys,
+			search: "00000",
+			steps:  []int{-1},
+			want:   fixedLenKeys,
+		},
+	}
+
+	for idx, test := range cases {
+		t.Run(fmt.Sprintf("case%03d", idx), func(t *testing.T) {
+			r := New[string]()
+
+			// Insert keys
+			txn := NewTxn(r)
+			for _, k := range test.keys {
+				old := txn.Insert([]byte(k), &k)
+				if old != nil {
+					t.Fatalf("duplicate key %s in keys", k)
+				}
+			}
+			r = txn.Commit()
+
+			// Get and seek iterator
+			iter := r.Iterator()
+			iter.SeekLowerBound([]byte(test.search))
+
+			for _, s := range test.steps {
+				if s > 0 {
+					for range s {
+						iter.Next()
+					}
+				} else {
+					iter.Back(uint64(-s))
+				}
+			}
+
+			// Consume all the keys
+			out := []string{}
+			for {
+				v := iter.Next()
+				if v == nil {
+					break
+				}
+				out = append(out, *v)
+			}
+			require.Equal(t, test.want, out)
+		})
+	}
+}
+
 type readableString string
 
 func (s readableString) Generate(rand *mathrand.Rand, _ int) reflect.Value {

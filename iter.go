@@ -154,8 +154,24 @@ func (i *Iterator[T]) Next() *T {
 	return nil
 }
 
+func (i *Iterator[T]) Back(count uint64) {
+	for len(i.stack) > 0 && count > 0 {
+		n := len(i.stack)
+		last := i.stack[n-1]
+		if last.edges[last.index].node != nil {
+			count--
+		}
+		if last.index == 0 {
+			i.stack = i.stack[:n-1]
+			continue
+		}
+		last.index--
+		i.stack[len(i.stack)-1] = last
+		i.findMax(last.edges[last.index].node)
+	}
+}
+
 func (i *Iterator[T]) findMin(n *Node[T]) {
-	// Traverse to the minimum child
 	for {
 		if n.value != nil {
 			i.stack = append(i.stack, item[T]{edges: edges[T]{{node: n}}, index: 0})
@@ -169,5 +185,21 @@ func (i *Iterator[T]) findMin(n *Node[T]) {
 			i.stack = append(i.stack, item[T]{edges: n.edges, index: 1})
 		}
 		n = n.edges[0].node
+	}
+}
+
+func (i *Iterator[T]) findMax(n *Node[T]) {
+	for {
+		if len(n.edges) == 0 {
+			return
+		}
+		if len(n.edges[len(n.edges)-1].node.edges) == 0 {
+			i.stack = append(i.stack, item[T]{edges: n.edges, index: len(n.edges) - 1})
+			return
+		}
+		if len(n.edges) > 1 {
+			i.stack = append(i.stack, item[T]{edges: n.edges, index: len(n.edges) - 2})
+		}
+		n = n.edges[len(n.edges)-1].node
 	}
 }
