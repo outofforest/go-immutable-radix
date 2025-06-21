@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
@@ -584,9 +585,1041 @@ func TestIterateLowerBound(t *testing.T) {
 	}
 }
 
-type readableString string
+func TestIterateBack(t *testing.T) {
+	// these should be defined in order
+	var fixedLenKeys = []string{
+		"00000",
+		"00001",
+		"00004",
+		"00010",
+		"00011",
+		"00012",
+		"00020",
+		"20020",
+	}
 
-func (s readableString) Generate(rand *mathrand.Rand, _ int) reflect.Value {
+	// these should be defined in order
+	var mixedLenKeys = []string{
+		"a1",
+		"abc",
+		"barbazboo",
+		"f",
+		"foo",
+		"found",
+		"zap",
+		"zip",
+	}
+
+	type exp struct {
+		keys   []string
+		prefix string
+		lower  string
+		steps  []int
+		want   []string
+	}
+
+	cases := []exp{
+		{
+			keys:  fixedLenKeys,
+			steps: []int{1, -1},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			steps: []int{3, -2},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{0},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00010",
+			steps: []int{-1},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{-1},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{1, -2},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{-1, 1},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{1, -1},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{2, -1},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{2, -2},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{3, -1},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{3, -2},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{3, -3},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{4, -1},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{4, -2},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{4, -3},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{4, -4},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{5, -1},
+			want: []string{
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{5, -2},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{5, -3},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{5, -4},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{5, -5},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -1},
+			want: []string{
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -2},
+			want: []string{
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -3},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -4},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -5},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{6, -6},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -1},
+			want: []string{
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -2},
+			want: []string{
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -3},
+			want: []string{
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -4},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -5},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -6},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -7},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -1},
+			want: []string{
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -2},
+			want: []string{
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -3},
+			want: []string{
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -4},
+			want: []string{
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -5},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -6},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -7},
+			want: []string{
+				"00001",
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{8, -8},
+			want:  fixedLenKeys,
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{9, -3},
+			want:  []string{},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{3, -2, 1},
+			want: []string{
+				"00004",
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{4, -2, 1},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -3, 3},
+			want: []string{
+				"20020",
+			},
+		},
+		{
+			keys:  fixedLenKeys,
+			lower: "00000",
+			steps: []int{7, -3, 3, -3},
+			want: []string{
+				"00011",
+				"00012",
+				"00020",
+				"20020",
+			},
+		},
+		{
+			keys:   fixedLenKeys,
+			prefix: "2",
+			steps:  []int{-1},
+			want: []string{
+				"20020",
+			},
+		},
+		{
+			keys:   fixedLenKeys,
+			prefix: "2",
+			steps:  []int{1, -1},
+			want: []string{
+				"20020",
+			},
+		},
+		{
+			keys:   fixedLenKeys,
+			prefix: "0001",
+			lower:  "2",
+			steps:  []int{-2},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+			},
+		},
+		{
+			keys:   fixedLenKeys,
+			prefix: "0001",
+			lower:  "2",
+			steps:  []int{-3},
+			want: []string{
+				"00010",
+				"00011",
+				"00012",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			steps:  []int{2, -2},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			steps:  []int{2, -1},
+			want: []string{
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "oo",
+			steps:  []int{-1},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "oo",
+			steps:  []int{-1, 2, -1},
+			want: []string{
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "oo",
+			steps:  []int{-1, 2, -2},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "ound",
+			steps:  []int{-1},
+			want: []string{
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "ound",
+			steps:  []int{-2},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:   mixedLenKeys,
+			prefix: "f",
+			lower:  "ound",
+			steps:  []int{-2, 2, -1},
+			want: []string{
+				"foo",
+				"found",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-1},
+			want: []string{
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-2},
+			want: []string{
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-3},
+			want: []string{
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-4},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5},
+			want: []string{
+				"barbazboo",
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-6},
+			want: []string{
+				"abc",
+				"barbazboo",
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-7},
+			want:  mixedLenKeys,
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-8},
+			want:  mixedLenKeys,
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5, 1},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5, 2},
+			want: []string{
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5, 3},
+			want: []string{
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5, 4},
+			want: []string{
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  mixedLenKeys,
+			lower: "zip",
+			steps: []int{-5, 2, -1},
+			want: []string{
+				"f",
+				"foo",
+				"found",
+				"zap",
+				"zip",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-1},
+			want: []string{
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-2},
+			want: []string{
+				"ab",
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-3},
+			want: []string{
+				"a",
+				"ab",
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-4},
+			want: []string{
+				"1",
+				"a",
+				"ab",
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-5},
+			want: []string{
+				"0",
+				"1",
+				"a",
+				"ab",
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-4, 3},
+			want: []string{
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "a", "ab", "abc", "abcd"},
+			lower: "abcd",
+			steps: []int{-4, 3, -2},
+			want: []string{
+				"a",
+				"ab",
+				"abc",
+				"abcd",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "4",
+			steps: []int{-1},
+			want: []string{
+				"3",
+				"4",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "4",
+			steps: []int{-2},
+			want: []string{
+				"2",
+				"3",
+				"4",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "4",
+			steps: []int{-3},
+			want: []string{
+				"1",
+				"2",
+				"3",
+				"4",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "4",
+			steps: []int{-4},
+			want: []string{
+				"0",
+				"1",
+				"2",
+				"3",
+				"4",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "4",
+			steps: []int{-4, 4, -2},
+			want: []string{
+				"2",
+				"3",
+				"4",
+			},
+		},
+		{
+			keys:  []string{"0", "1", "2", "3", "4"},
+			lower: "2",
+			steps: []int{-1, 2, -1},
+			want: []string{
+				"2",
+				"3",
+				"4",
+			},
+		},
+	}
+
+	for idx, test := range cases {
+		t.Run(fmt.Sprintf("case%03d", idx), func(t *testing.T) {
+			r := New[string]()
+
+			// Insert keys
+			txn := NewTxn(r)
+			for _, k := range test.keys {
+				old := txn.Insert([]byte(k), &k)
+				if old != nil {
+					t.Fatalf("duplicate key %s in keys", k)
+				}
+			}
+			r = txn.Commit()
+
+			// Get and seek iterator
+			iter := r.Iterator()
+			if test.prefix != "" {
+				iter.SeekPrefix([]byte(test.prefix))
+			}
+			if test.lower != "" {
+				iter.SeekLowerBound([]byte(test.lower))
+			}
+
+			for _, s := range test.steps {
+				if s > 0 {
+					for range s {
+						iter.Next()
+					}
+				} else {
+					iter.Back(uint64(-s))
+				}
+			}
+
+			// Consume all the keys
+			out := []string{}
+			for {
+				v := iter.Next()
+				if v == nil {
+					break
+				}
+				out = append(out, *v)
+			}
+			require.Equal(t, test.want, out)
+		})
+	}
+}
+
+func TestIterateBackFuzz(t *testing.T) {
+	for range 10 {
+		r := New[string]()
+		txn := NewTxn(r)
+
+		rand := mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+		values := make([]string, 0, 1000)
+		valuesMap := map[string]struct{}{}
+		for len(values) < cap(values) {
+			v := randString(rand)
+			if _, exists := valuesMap[v]; exists {
+				continue
+			}
+			valuesMap[v] = struct{}{}
+			values = append(values, v)
+			txn.Insert([]byte(v), &v)
+		}
+		r = txn.Commit()
+
+		sort.Strings(values)
+
+		for i := range values {
+			iter := r.Iterator()
+			iter.SeekLowerBound([]byte(values[len(values)-1]))
+			iter.Back(uint64(i))
+
+			values2 := make([]string, 0, len(values))
+			for {
+				v := iter.Next()
+				if v == nil {
+					break
+				}
+				values2 = append(values2, *v)
+			}
+
+			require.Equal(t, values[len(values)-i-1:], values2)
+		}
+
+		start := len(values) / 2
+		back := start / 2
+		end := start - back + start - back
+
+		iter := r.Iterator()
+		iter.SeekLowerBound([]byte(values[start]))
+		iter.Back(uint64(back))
+		for range start {
+			iter.Next()
+		}
+		iter.Back(uint64(back))
+		values2 := make([]string, 0, len(values))
+		for {
+			v := iter.Next()
+			if v == nil {
+				break
+			}
+			values2 = append(values2, *v)
+		}
+
+		require.Equal(t, values[end:], values2)
+	}
+}
+
+func randString(rand *mathrand.Rand) string {
 	// Pick a random string from a limited alphabet that makes it easy to read the
 	// failure cases.
 	const letters = "abcdefg"
@@ -599,7 +1632,13 @@ func (s readableString) Generate(rand *mathrand.Rand, _ int) reflect.Value {
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}
-	return reflect.ValueOf(readableString(b))
+	return string(b)
+}
+
+type readableString string
+
+func (s readableString) Generate(rand *mathrand.Rand, _ int) reflect.Value {
+	return reflect.ValueOf(readableString(randString(rand)))
 }
 
 func TestIterateLowerBoundFuzz(t *testing.T) {

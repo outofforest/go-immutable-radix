@@ -4,11 +4,16 @@ import (
 	"bytes"
 )
 
+type item[T any] struct {
+	edges          edges[T]
+	index1, index2 int
+}
+
 // Iterator is used to iterate over a set of nodes
 // in pre-order.
 type Iterator[T any] struct {
 	node  *Node[T]
-	stack []edges[T]
+	stack []item[T]
 	skip  int
 }
 
@@ -49,148 +54,168 @@ func (i *Iterator[T]) SeekLowerBound(key []byte) {
 	if i.node == nil {
 		return
 	}
-	// Wipe the stack. Unlike Prefix iteration, we need to build the stack as we
-	// go because we need only a subset of edges of many nodes in the path to the
-	// leaf with the lower bound. Note that the iterator will still recurse into
-	// children that we don't traverse on the way to the reverse lower bound as it
-	// walks the stack.
-	i.stack = []edges[T]{}
-	// i.node starts off in the common case as pointing to the root node of the
-	// tree. By the time we return we have either found a lower bound and setup
-	// the stack to traverse all larger keys, or we have not and the stack and
-	// node should both be nil to prevent the iterator from assuming it is just
-	// iterating the whole tree from the root node. Either way this needs to end
-	// up as nil so just set it here.
-	n := i.node
-	i.node = nil
-	search := key
+	i.initStack()
 
-	found := func(n *Node[T]) {
-		i.stack = append(i.stack, edges[T]{edge[T]{node: n}})
-	}
+	for len(i.stack) > 0 {
+		n := i.peek()
 
-	findMin := func(n *Node[T]) {
-		if n := i.findMin(n); n != nil {
-			i.stack = append(i.stack, edges[T]{edge[T]{node: n}})
-		}
-	}
-
-	for {
-		prefix := n.prefix
-		if i.skip > 0 {
-			prefix = prefix[i.skip:]
-			i.skip = 0
+		cmp := key
+		if len(n.prefix) < len(key) {
+			cmp = key[:len(n.prefix)]
 		}
 
-		// Compare current prefix with the search key's same-length prefix.
-		var prefixCmp int
-		if len(prefix) < len(search) {
-			prefixCmp = bytes.Compare(prefix, search[:len(prefix)])
-		} else {
-			prefixCmp = bytes.Compare(prefix, search)
+		prefixCmp := bytes.Compare(n.prefix, cmp)
+
+		if prefixCmp == 0 && len(n.prefix) == len(key) {
+			return
 		}
 
+		if prefixCmp > 0 && n.value != nil {
+			return
+		}
+
+		i.pop()
 		if prefixCmp > 0 {
-			// Prefix is larger, that means the lower bound is greater than the search
-			// and from now on we need to follow the minimum path to the smallest
-			// leaf under this subtree.
-			findMin(n)
+			i.findMin(n)
 			return
 		}
 
 		if prefixCmp < 0 {
-			// Prefix is smaller than search prefix, that means there is no lower
-			// bound
 			i.node = nil
-			return
-		}
-
-		// Prefix is equal, we are still heading for an exact match. If this is a
-		// leaf and an exact match we're done.
-		if len(prefix) == len(search) && n.value != nil {
-			found(n)
 			return
 		}
 
 		// Consume the search prefix if the current node has one. Note that this is
 		// safe because if n.prefix is longer than the search slice prefixCmp would
 		// have been > 0 above and the method would have already returned.
-		search = search[len(prefix):]
+		key = key[len(n.prefix):]
 
-		if len(search) == 0 {
-			// We've exhausted the search key, but the current node is not an exact
-			// match or not a leaf. That means that the leaf value if it exists, and
-			// all child nodes must be strictly greater, the smallest key in this
-			// subtree must be the lower bound.
-			findMin(n)
-			return
-		}
-
-		// Otherwise, take the lower bound next edge.
-		idx, lbNode := n.getLowerBoundEdge(search[0])
+		idx, lbNode := n.getLowerBoundEdge(key[0])
 		if lbNode == nil {
 			return
 		}
 
-		// Create stack edges for the all strictly higher edges in this node.
-		if idx+1 < len(n.edges) {
-			i.stack = append(i.stack, n.edges[idx+1:])
-		}
-
-		// Recurse
-		n = lbNode
+		i.stack = append(i.stack, item[T]{edges: n.edges, index1: idx, index2: idx})
 	}
 }
 
 // Next returns the next node in order.
 func (i *Iterator[T]) Next() *T {
-	// Initialize our stack if needed
 	if i.stack == nil && i.node != nil {
-		i.stack = []edges[T]{
-			{
-				edge[T]{node: i.node},
-			},
-		}
+		i.initStack()
 	}
 
 	for len(i.stack) > 0 {
-		// Inspect the last element of the stack.
-		n := len(i.stack)
-		last := i.stack[n-1]
-		elem := last[0].node
-
-		// Update the stack.
-		if len(last) > 1 {
-			i.stack[n-1] = last[1:]
-		} else {
-			i.stack = i.stack[:n-1]
-		}
-
-		// Push the edges onto the frontier.
-		if len(elem.edges) > 0 {
-			i.stack = append(i.stack, elem.edges)
-		}
-
-		// Return the leaf values if any
-		if elem.value != nil {
-			return elem.value
+		if n := i.forward(); n != nil && n.value != nil {
+			return n.value
 		}
 	}
 	return nil
 }
 
-func (i *Iterator[T]) findMin(n *Node[T]) *Node[T] {
-	// Traverse to the minimum child
+// Back moves iterator back.
+func (i *Iterator[T]) Back(count uint64) {
+	for len(i.stack) > 0 && count > 0 {
+		n := i.backward()
+		if n != nil && n.value != nil {
+			count--
+		}
+	}
+}
+
+func (i *Iterator[T]) peek() *Node[T] {
+	itm := i.stack[len(i.stack)-1]
+	return itm.edges[itm.index1].node
+}
+
+func (i *Iterator[T]) pop() *Node[T] {
+	itm := i.stack[len(i.stack)-1]
+	n := itm.edges[itm.index1].node
+
+	i.stack[len(i.stack)-1].index1++
+	i.stack[len(i.stack)-1].index2++
+	return n
+}
+
+func (i *Iterator[T]) forward() *Node[T] {
+	itm := &i.stack[len(i.stack)-1]
+	if itm.index2 == len(itm.edges) {
+		i.stack = i.stack[:len(i.stack)-1]
+		if len(i.stack) > 0 {
+			itm := &i.stack[len(i.stack)-1]
+			itm.index2 = itm.index1
+		}
+		return nil
+	}
+
+	n := itm.edges[itm.index2].node
+	itm.index1++
+	itm.index2++
+
+	if len(n.edges) > 0 {
+		i.stack = append(i.stack, item[T]{edges: n.edges, index1: 0, index2: 0})
+	}
+
+	return n
+}
+
+func (i *Iterator[T]) backward() *Node[T] {
+	itm := &i.stack[len(i.stack)-1]
+	if itm.index1 == 0 {
+		i.stack = i.stack[:len(i.stack)-1]
+		if len(i.stack) == 0 {
+			i.stack = nil
+			return nil
+		}
+
+		itm := &i.stack[len(i.stack)-1]
+		if itm.index1 == itm.index2 {
+			itm.index1--
+			itm.index2--
+			return itm.edges[itm.index1].node
+		}
+		return nil
+	}
+
+	if itm.index1 == itm.index2 {
+		itm.index2--
+		n := itm.edges[itm.index2].node
+		if len(n.edges) > 0 {
+			i.stack = append(i.stack, item[T]{edges: n.edges, index1: len(n.edges), index2: len(n.edges)})
+			return nil
+		}
+	}
+
+	itm.index1--
+	return itm.edges[itm.index1].node
+}
+
+func (i *Iterator[T]) findMin(n *Node[T]) {
 	for {
-		if n.value != nil {
-			return n
-		}
-		nEdges := len(n.edges)
-		if nEdges > 1 {
-			// Add all the other edges to the stack (the min node will be added as
-			// we recurse)
-			i.stack = append(i.stack, n.edges[1:])
-		}
+		i.stack = append(i.stack, item[T]{edges: n.edges, index1: 0, index2: 0})
 		n = n.edges[0].node
+		if n.value != nil {
+			return
+		}
+		i.pop()
+	}
+}
+
+func (i *Iterator[T]) initStack() {
+	i.stack = []item[T]{
+		{
+			edges: edges[T]{
+				{
+					node: &Node[T]{
+						revision: i.node.revision,
+						value:    i.node.value,
+						prefix:   i.node.prefix[i.skip:],
+						edges:    i.node.edges,
+					},
+				},
+			},
+			index1: 0,
+			index2: 0,
+		},
 	}
 }
