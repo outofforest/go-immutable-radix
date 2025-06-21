@@ -177,7 +177,7 @@ func (i *Iterator[T]) findMin(n *Node[T]) {
 			i.stack = append(i.stack, item[T]{edges: edges[T]{{node: n}}, index: 0})
 			return
 		}
-		if n.edges[0].node != nil {
+		if n.edges[0].node.value != nil {
 			i.stack = append(i.stack, item[T]{edges: n.edges, index: 0})
 			return
 		}
